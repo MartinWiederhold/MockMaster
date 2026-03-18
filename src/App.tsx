@@ -174,6 +174,62 @@ function App() {
         ctx.drawImage(tempCanvas, 0, 0);
         ctx.restore();
 
+        // --- Glass Reflection Effect ---
+        const gradient = ctx.createLinearGradient(
+          points[0].x,
+          points[0].y,
+          points[2].x,
+          points[2].y
+        );
+        gradient.addColorStop(0, "rgba(255,255,255,0.08)");
+        gradient.addColorStop(0.5, "rgba(255,255,255,0.03)");
+        gradient.addColorStop(1, "rgba(255,255,255,0.0)");
+
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        points.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // --- Advanced Screen Glow ---
+        ctx.save();
+        ctx.globalCompositeOperation = "soft-light";
+        ctx.fillStyle = "rgba(255,255,255,0.06)";
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        points.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // --- Subtle Vignette ---
+        const centerX = (points[0].x + points[2].x) / 2;
+        const centerY = (points[0].y + points[2].y) / 2;
+        const vignette = ctx.createRadialGradient(
+          centerX,
+          centerY,
+          10,
+          centerX,
+          centerY,
+          600
+        );
+        vignette.addColorStop(0, "rgba(0,0,0,0)");
+        vignette.addColorStop(1, "rgba(0,0,0,0.15)");
+
+        ctx.save();
+        ctx.globalCompositeOperation = "multiply";
+        ctx.fillStyle = vignette;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        points.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
         src.delete();
         dst.delete();
         srcTri.delete();
