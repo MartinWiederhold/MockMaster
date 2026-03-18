@@ -798,7 +798,7 @@ function App() {
             />
           </div>
 
-          <label className="switch-row">
+          <div className="switch-row">
             <span>Glass Layer</span>
             <button
               type="button"
@@ -807,9 +807,9 @@ function App() {
             >
               <span className="switch-knob" />
             </button>
-          </label>
+          </div>
 
-          <label className="switch-row">
+          <div className="switch-row">
             <span>Geräte-Notch freistellen</span>
             <button
               type="button"
@@ -818,9 +818,9 @@ function App() {
             >
               <span className="switch-knob" />
             </button>
-          </label>
+          </div>
 
-          <label className="switch-row">
+          <div className="switch-row">
             <span>Zoom aktivieren</span>
             <button
               type="button"
@@ -833,7 +833,7 @@ function App() {
             >
               <span className="switch-knob" />
             </button>
-          </label>
+          </div>
 
           {zoomEnabled && (
             <div className="control">
@@ -850,7 +850,7 @@ function App() {
             </div>
           )}
 
-          <label className="switch-row">
+          <div className="switch-row">
             <span>Guides anzeigen</span>
             <button
               type="button"
@@ -859,7 +859,7 @@ function App() {
             >
               <span className="switch-knob" />
             </button>
-          </label>
+          </div>
 
           <div className="status">
             <strong>Status:</strong> {status}
