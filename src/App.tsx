@@ -9,6 +9,8 @@ declare global {
   }
 }
 
+type NotchMode = "auto" | "laptop" | "iphone";
+
 function App() {
   const baseCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -22,6 +24,8 @@ function App() {
   const [showGuides, setShowGuides] = useState(true);
   const [overlayOpacity, setOverlayOpacity] = useState(100);
   const [glassEnabled, setGlassEnabled] = useState(true);
+  const [notchEnabled, setNotchEnabled] = useState(true);
+  const [notchMode, setNotchMode] = useState<NotchMode>("auto");
 
   useEffect(() => {
     const existing = document.getElementById("opencv-script");
@@ -132,6 +136,90 @@ function App() {
     drawGuides(ctx);
   };
 
+  const getTopWidth = () => {
+    if (points.length !== 4) return 0;
+    return Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y);
+  };
+
+  const getQuadTopCenter = () => {
+    return {
+      x: (points[0].x + points[1].x) / 2,
+      y: (points[0].y + points[1].y) / 2,
+    };
+  };
+
+  const getResolvedNotchMode = (): Exclude<NotchMode, "auto"> => {
+    if (notchMode !== "auto") return notchMode;
+    if (!overlayImg) return "laptop";
+    return overlayImg.height > overlayImg.width ? "iphone" : "laptop";
+  };
+
+  const applyNotchMask = (ctx: CanvasRenderingContext2D) => {
+    if (!notchEnabled || points.length !== 4) return;
+
+    const mode = getResolvedNotchMode();
+    const topWidth = getTopWidth();
+    const center = getQuadTopCenter();
+
+    let notchWidth = topWidth * 0.16;
+    let notchHeight = topWidth * 0.032;
+    let radius = notchHeight * 0.45;
+    let offsetY = 2;
+
+    if (mode === "iphone") {
+      notchWidth = topWidth * 0.28;
+      notchHeight = topWidth * 0.06;
+      radius = notchHeight * 0.48;
+      offsetY = 3;
+    }
+
+    const x = center.x - notchWidth / 2;
+    const y = center.y - notchHeight / 2 + offsetY;
+
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + notchWidth - radius, y);
+    ctx.quadraticCurveTo(x + notchWidth, y, x + notchWidth, y + radius);
+    ctx.lineTo(x + notchWidth, y + notchHeight - radius);
+    ctx.quadraticCurveTo(
+      x + notchWidth,
+      y + notchHeight,
+      x + notchWidth - radius,
+      y + notchHeight
+    );
+    ctx.lineTo(x + radius, y + notchHeight);
+    ctx.quadraticCurveTo(x, y + notchHeight, x, y + notchHeight - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + notchWidth - radius, y);
+    ctx.quadraticCurveTo(x + notchWidth, y, x + notchWidth, y + radius);
+    ctx.lineTo(x + notchWidth, y + notchHeight - radius);
+    ctx.quadraticCurveTo(
+      x + notchWidth,
+      y + notchHeight,
+      x + notchWidth - radius,
+      y + notchHeight
+    );
+    ctx.lineTo(x + radius, y + notchHeight);
+    ctx.quadraticCurveTo(x, y + notchHeight, x, y + notchHeight - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  };
+
   const drawOverlay = (forExport = false) => {
     const canvas = overlayCanvasRef.current;
     if (!canvas) return;
@@ -196,6 +284,8 @@ function App() {
         ctx.globalAlpha = overlayOpacity / 100;
         ctx.drawImage(tempCanvas, 0, 0);
         ctx.restore();
+
+        applyNotchMask(ctx);
 
         if (glassEnabled) {
           const quadPath = new Path2D();
@@ -262,7 +352,17 @@ function App() {
 
   useEffect(() => {
     redrawAll();
-  }, [baseImg, overlayImg, points, cvReady, showGuides, overlayOpacity, glassEnabled]);
+  }, [
+    baseImg,
+    overlayImg,
+    points,
+    cvReady,
+    showGuides,
+    overlayOpacity,
+    glassEnabled,
+    notchEnabled,
+    notchMode,
+  ]);
 
   const autoDetectScreen = () => {
     if (!baseImg || !cvReady || !window.cv) {
@@ -462,6 +562,28 @@ function App() {
             />
             <span>Glass Layer aktiv</span>
           </label>
+
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={notchEnabled}
+              onChange={(e) => setNotchEnabled(e.target.checked)}
+            />
+            <span>Notch aktiv</span>
+          </label>
+
+          <div className="control">
+            <label htmlFor="notchMode">Notch Gerät</label>
+            <select
+              id="notchMode"
+              value={notchMode}
+              onChange={(e) => setNotchMode(e.target.value as NotchMode)}
+            >
+              <option value="auto">Auto</option>
+              <option value="laptop">Laptop</option>
+              <option value="iphone">iPhone</option>
+            </select>
+          </div>
 
           <label className="toggle">
             <input
