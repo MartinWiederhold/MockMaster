@@ -68,43 +68,10 @@ function App() {
     ];
   };
 
-  useEffect(() => {
-    if (!baseImg || points.length !== 4) return;
-    drawBase();
-  }, [baseImg, points, canvasSize, showGuides]);
-
-  useEffect(() => {
-    drawOverlay();
-  }, [baseImg, overlayImg, points, cvReady, canvasSize, showGuides, overlayOpacity]);
-
-  const loadImageFromFile = (file: File, cb: (img: HTMLImageElement) => void) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      cb(img);
-      URL.revokeObjectURL(url);
-    };
-    img.src = url;
-  };
-
-  const handleBaseUpload = (file?: File) => {
-    if (!file) return;
-    loadImageFromFile(file, (img) => {
-      setBaseImg(img);
-      setPoints(createInsetPoints(img.width, img.height));
-    });
-  };
-
-  const handleOverlayUpload = (file?: File) => {
-    if (!file) return;
-    loadImageFromFile(file, setOverlayImg);
-  };
-
   const drawGuides = (ctx: CanvasRenderingContext2D) => {
     if (!showGuides || points.length !== 4) return;
 
     ctx.save();
-
     ctx.lineWidth = 2;
     ctx.strokeStyle = "#8b5cf6";
     ctx.beginPath();
@@ -126,7 +93,6 @@ function App() {
       ctx.font = "bold 16px sans-serif";
       ctx.fillText(String(i + 1), p.x + 14, p.y - 14);
     });
-
     ctx.restore();
   };
 
@@ -140,13 +106,6 @@ function App() {
     canvas.height = canvasSize.height;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "#101114";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    if (baseImg) {
-      ctx.drawImage(baseImg, 0, 0, canvas.width, canvas.height);
-    }
-
     drawGuides(ctx);
   };
 
@@ -220,6 +179,10 @@ function App() {
         srcTri.delete();
         dstTri.delete();
         M.delete();
+
+        if (!forExport) {
+          setStatus("Image auf Mockup angewendet");
+        }
       } catch (e) {
         console.error(e);
         setStatus("Fehler bei der Perspektivtransformation");
@@ -228,6 +191,140 @@ function App() {
 
     if (!forExport) {
       drawGuides(ctx);
+    }
+  };
+
+  useEffect(() => {
+    drawBase();
+  }, [baseImg, points, canvasSize, showGuides]);
+
+  useEffect(() => {
+    drawOverlay();
+  }, [baseImg, overlayImg, points, cvReady, canvasSize, showGuides, overlayOpacity]);
+
+  const loadImageFromFile = (file: File, cb: (img: HTMLImageElement) => void) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      cb(img);
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  };
+
+  const handleBaseUpload = (file?: File) => {
+    if (!file) return;
+    loadImageFromFile(file, (img) => {
+      setBaseImg(img);
+      setPoints(createInsetPoints(img.width, img.height));
+      setStatus("Mockup geladen");
+    });
+  };
+
+  const handleOverlayUpload = (file?: File) => {
+    if (!file) return;
+    loadImageFromFile(file, (img) => {
+      setOverlayImg(img);
+      setStatus("Image geladen");
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => drawOverlay());
+      });
+    });
+  };
+
+  const orderQuadPoints = (pts: Point[]): Point[] => {
+    const sums = pts.map((p) => p.x + p.y);
+    const diffs = pts.map((p) => p.x - p.y);
+
+    const topLeft = pts[sums.indexOf(Math.min(...sums))];
+    const bottomRight = pts[sums.indexOf(Math.max(...sums))];
+    const topRight = pts[diffs.indexOf(Math.max(...diffs))];
+    const bottomLeft = pts[diffs.indexOf(Math.min(...diffs))];
+
+    return [topLeft, topRight, bottomRight, bottomLeft];
+  };
+
+  const autoDetectScreen = () => {
+    if (!baseImg || !cvReady || !window.cv) {
+      setStatus("Bitte zuerst Mockup laden und auf OpenCV warten");
+      return;
+    }
+
+    try {
+      setStatus("Screen-Erkennung läuft...");
+      const cv = window.cv;
+
+      const srcCanvas = document.createElement("canvas");
+      srcCanvas.width = baseImg.width;
+      srcCanvas.height = baseImg.height;
+      const srcCtx = srcCanvas.getContext("2d");
+      if (!srcCtx) return;
+      srcCtx.drawImage(baseImg, 0, 0);
+
+      const src = cv.imread(srcCanvas);
+      const gray = new cv.Mat();
+      const blur = new cv.Mat();
+      const edges = new cv.Mat();
+      const contours = new cv.MatVector();
+      const hierarchy = new cv.Mat();
+
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+      cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+      cv.Canny(blur, edges, 75, 200);
+
+      const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+      cv.dilate(edges, edges, kernel);
+
+      cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+      let bestArea = 0;
+      let bestQuad: Point[] | null = null;
+      const minArea = baseImg.width * baseImg.height * 0.03;
+
+      for (let i = 0; i < contours.size(); i++) {
+        const contour = contours.get(i);
+        const perimeter = cv.arcLength(contour, true);
+        const approx = new cv.Mat();
+        cv.approxPolyDP(contour, approx, 0.02 * perimeter, true);
+
+        if (approx.rows === 4) {
+          const area = Math.abs(cv.contourArea(approx));
+          const isConvex = cv.isContourConvex(approx);
+
+          if (isConvex && area > minArea && area > bestArea) {
+            const data = approx.data32S;
+            const pts: Point[] = [
+              { x: data[0], y: data[1] },
+              { x: data[2], y: data[3] },
+              { x: data[4], y: data[5] },
+              { x: data[6], y: data[7] },
+            ];
+            bestQuad = orderQuadPoints(pts);
+            bestArea = area;
+          }
+        }
+
+        approx.delete();
+        contour.delete();
+      }
+
+      kernel.delete();
+      src.delete();
+      gray.delete();
+      blur.delete();
+      edges.delete();
+      contours.delete();
+      hierarchy.delete();
+
+      if (bestQuad) {
+        setPoints(bestQuad);
+        setStatus("Screen automatisch erkannt");
+      } else {
+        setStatus("Kein passender Screen gefunden – bitte manuell nachjustieren");
+      }
+    } catch (error) {
+      console.error(error);
+      setStatus("Fehler bei der automatischen Erkennung");
     }
   };
 
@@ -262,6 +359,7 @@ function App() {
   const resetPoints = () => {
     if (!baseImg) return;
     setPoints(createInsetPoints(baseImg.width, baseImg.height));
+    setStatus("Punkte zurückgesetzt");
   };
 
   const exportImage = () => {
@@ -273,17 +371,18 @@ function App() {
     link.href = canvas.toDataURL("image/png");
     link.click();
     drawOverlay(false);
+    setStatus("PNG exportiert");
   };
 
   return (
     <main className="app">
       <aside className="sidebar">
         <h1>screenfit</h1>
-        <p className="sub">BMAD MVP – polished</p>
+        <p className="sub">BMAD MVP – auto detect</p>
 
         <div className="panel">
           <label className="upload">
-            <span>1. Basisbild laden</span>
+            <span>1. Mockup laden</span>
             <input
               type="file"
               accept="image/png,image/jpeg,image/webp"
@@ -292,7 +391,7 @@ function App() {
           </label>
 
           <label className="upload">
-            <span>2. Screenshot laden</span>
+            <span>2. Image laden</span>
             <input
               type="file"
               accept="image/png,image/jpeg,image/webp"
@@ -300,8 +399,12 @@ function App() {
             />
           </label>
 
+          <button onClick={autoDetectScreen}>Screen automatisch erkennen</button>
+          <button onClick={resetPoints}>Punkte resetten</button>
+          <button onClick={exportImage}>PNG exportieren</button>
+
           <div className="control">
-            <label htmlFor="opacity">Overlay Opacity: {overlayOpacity}%</label>
+            <label htmlFor="opacity">Image Opacity: {overlayOpacity}%</label>
             <input
               id="opacity"
               type="range"
@@ -320,9 +423,6 @@ function App() {
             />
             <span>Guides anzeigen</span>
           </label>
-
-          <button onClick={resetPoints}>Punkte resetten</button>
-          <button onClick={exportImage}>PNG exportieren</button>
 
           <div className="status">
             <strong>Status:</strong> {status}
