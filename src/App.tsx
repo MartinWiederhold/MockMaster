@@ -33,7 +33,8 @@ function App() {
   const [notchEnabled, setNotchEnabled] = useState(true);
   const [detectedNotch, setDetectedNotch] = useState<NotchSpec | null>(null);
   const [zoomEnabled, setZoomEnabled] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(1);
+  const [zoomLevel, setZoomLevel] = useState(1.5);
+  const [zoomFocus, setZoomFocus] = useState({ x: 50, y: 50 });
 
   useEffect(() => {
     const existing = document.getElementById("opencv-script");
@@ -112,7 +113,10 @@ function App() {
     const edgeUnit = { x: topVec.x / topWidth, y: topVec.y / topWidth };
 
     const topMid = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
-    const quadCenter = { x: (p0.x + p1.x + p2.x + p3.x) / 4, y: (p0.y + p1.y + p2.y + p3.y) / 4 };
+    const quadCenter = {
+      x: (p0.x + p1.x + p2.x + p3.x) / 4,
+      y: (p0.y + p1.y + p2.y + p3.y) / 4,
+    };
     const inwardVec = { x: quadCenter.x - topMid.x, y: quadCenter.y - topMid.y };
     const inwardLen = Math.hypot(inwardVec.x, inwardVec.y) || 1;
     const inwardUnit = { x: inwardVec.x / inwardLen, y: inwardVec.y / inwardLen };
@@ -221,7 +225,7 @@ function App() {
 
     points.forEach((p, i) => {
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 9, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
       ctx.fillStyle = "#ffffff";
       ctx.fill();
       ctx.lineWidth = 3;
@@ -418,16 +422,16 @@ function App() {
 
       cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
       cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
-      cv.Canny(blur, edges, 75, 200);
+      cv.Canny(blur, edges, 50, 160);
 
       const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
       cv.dilate(edges, edges, kernel);
 
       cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
 
-      let bestArea = 0;
+      let bestScore = 0;
       let bestQuad: Point[] | null = null;
-      const minArea = baseImg.width * baseImg.height * 0.03;
+      const minArea = baseImg.width * baseImg.height * 0.02;
 
       for (let i = 0; i < contours.size(); i++) {
         const contour = contours.get(i);
@@ -439,7 +443,7 @@ function App() {
           const area = Math.abs(cv.contourArea(approx));
           const isConvex = cv.isContourConvex(approx);
 
-          if (isConvex && area > minArea && area > bestArea) {
+          if (isConvex && area > minArea) {
             const data = approx.data32S;
             const pts: Point[] = [
               { x: data[0], y: data[1] },
@@ -447,8 +451,21 @@ function App() {
               { x: data[4], y: data[5] },
               { x: data[6], y: data[7] },
             ];
-            bestQuad = orderQuadPoints(pts);
-            bestArea = area;
+            const ordered = orderQuadPoints(pts);
+
+            const top = Math.hypot(ordered[1].x - ordered[0].x, ordered[1].y - ordered[0].y);
+            const bottom = Math.hypot(ordered[2].x - ordered[3].x, ordered[2].y - ordered[3].y);
+            const left = Math.hypot(ordered[3].x - ordered[0].x, ordered[3].y - ordered[0].y);
+            const right = Math.hypot(ordered[2].x - ordered[1].x, ordered[2].y - ordered[1].y);
+
+            const widthBalance = 1 - Math.min(1, Math.abs(top - bottom) / Math.max(top, bottom, 1));
+            const heightBalance = 1 - Math.min(1, Math.abs(left - right) / Math.max(left, right, 1));
+            const score = area * 0.8 + widthBalance * 10000 + heightBalance * 10000;
+
+            if (score > bestScore) {
+              bestScore = score;
+              bestQuad = ordered;
+            }
           }
         }
 
@@ -468,7 +485,6 @@ function App() {
         setPoints(bestQuad);
         setDetectedNotch(null);
         setStatus("Screen automatisch erkannt");
-        requestAnimationFrame(() => requestAnimationFrame(redrawAll));
       } else {
         setStatus("Kein passender Screen gefunden – bitte manuell nachjustieren");
       }
@@ -502,8 +518,8 @@ function App() {
       const leftHeight = Math.hypot(points[3].x - points[0].x, points[3].y - points[0].y);
       const rightHeight = Math.hypot(points[2].x - points[1].x, points[2].y - points[1].y);
 
-      const warpW = Math.max(600, Math.round((topWidth + bottomWidth) / 2));
-      const warpH = Math.max(400, Math.round((leftHeight + rightHeight) / 2));
+      const warpW = Math.max(700, Math.round((topWidth + bottomWidth) / 2));
+      const warpH = Math.max(450, Math.round((leftHeight + rightHeight) / 2));
 
       const srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
         points[0].x, points[0].y,
@@ -534,15 +550,21 @@ function App() {
       const gray = new cv.Mat();
       cv.cvtColor(warped, gray, cv.COLOR_RGBA2GRAY, 0);
 
-      const topBandHeight = Math.max(40, Math.round(warpH * 0.18));
-      const roiX = Math.round(warpW * 0.22);
-      const roiW = Math.round(warpW * 0.56);
+      const topBandHeight = Math.max(50, Math.round(warpH * 0.2));
+      const roiX = Math.round(warpW * 0.18);
+      const roiW = Math.round(warpW * 0.64);
 
       const topBandRect = new cv.Rect(roiX, 0, roiW, topBandHeight);
       const topBand = gray.roi(topBandRect);
 
+      const blur = new cv.Mat();
+      cv.GaussianBlur(topBand, blur, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+
       const thresh = new cv.Mat();
-      cv.threshold(topBand, thresh, 70, 255, cv.THRESH_BINARY_INV);
+      cv.threshold(blur, thresh, 85, 255, cv.THRESH_BINARY_INV);
+
+      const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 3));
+      cv.morphologyEx(thresh, thresh, cv.MORPH_CLOSE, kernel);
 
       const contours = new cv.MatVector();
       const hierarchy = new cv.Mat();
@@ -559,15 +581,17 @@ function App() {
         const aspect = rect.width / Math.max(rect.height, 1);
 
         const valid =
-          area > roiW * topBandHeight * 0.004 &&
-          rect.y < topBandHeight * 0.7 &&
-          aspect > 1.2 &&
+          area > roiW * topBandHeight * 0.006 &&
+          rect.y < topBandHeight * 0.72 &&
+          aspect > 1.4 &&
           aspect < 8.5 &&
-          rect.width > roiW * 0.05 &&
-          rect.width < roiW * 0.55;
+          rect.width > roiW * 0.06 &&
+          rect.width < roiW * 0.58 &&
+          rect.height > topBandHeight * 0.08 &&
+          rect.height < topBandHeight * 0.55;
 
         if (valid) {
-          const score = area - centerDist * 10;
+          const score = area - centerDist * 12;
           if (!bestRect || score > bestRect.score) {
             bestRect = {
               x: rect.x + roiX,
@@ -604,11 +628,11 @@ function App() {
       warped.delete();
       gray.delete();
       topBand.delete();
+      blur.delete();
       thresh.delete();
+      kernel.delete();
       contours.delete();
       hierarchy.delete();
-
-      requestAnimationFrame(() => requestAnimationFrame(redrawAll));
     } catch (error) {
       console.error(error);
       setStatus("Fehler bei der Geräte-Notch-Erkennung");
@@ -630,7 +654,6 @@ function App() {
     loadImageFromFile(file, (img) => {
       setOverlayImg(img);
       setStatus("Image geladen");
-      requestAnimationFrame(() => requestAnimationFrame(redrawAll));
     });
   };
 
@@ -638,29 +661,54 @@ function App() {
     const canvas = baseCanvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
+    const localX = event.clientX - rect.left;
+    const localY = event.clientY - rect.top;
+
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
+
     return {
-      x: (event.clientX - rect.left) * scaleX / zoomLevel,
-      y: (event.clientY - rect.top) * scaleY / zoomLevel,
+      x: localX * scaleX,
+      y: localY * scaleY,
     };
   };
 
   const handleMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
     const pos = getCanvasPoint(event);
-    const hitIndex = points.findIndex((p) => Math.hypot(p.x - pos.x, p.y - pos.y) < 22);
-    if (hitIndex >= 0) setDragIndex(hitIndex);
+    const hitIndex = points.findIndex((p) => Math.hypot(p.x - pos.x, p.y - pos.y) < 32);
+    if (hitIndex >= 0) {
+      setDragIndex(hitIndex);
+      setStatus(`Punkt ${hitIndex + 1} wird angepasst`);
+    }
   };
 
   const handleMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = baseCanvasRef.current;
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect();
+      const rx = ((event.clientX - rect.left) / rect.width) * 100;
+      const ry = ((event.clientY - rect.top) / rect.height) * 100;
+      setZoomFocus({
+        x: Math.max(0, Math.min(100, rx)),
+        y: Math.max(0, Math.min(100, ry)),
+      });
+    }
+
     if (dragIndex === null) return;
+    event.preventDefault();
     const pos = getCanvasPoint(event);
     setPoints((prev) =>
       prev.map((p, i) => (i === dragIndex ? { x: pos.x, y: pos.y } : p))
     );
   };
 
-  const handleMouseUp = () => setDragIndex(null);
+  const handleMouseUp = () => {
+    if (dragIndex !== null) {
+      setStatus("Punkte manuell nachjustiert");
+    }
+    setDragIndex(null);
+  };
 
   const resetPoints = () => {
     if (!baseImg) return;
@@ -677,7 +725,7 @@ function App() {
     setDragIndex(null);
     setOverlayOpacity(100);
     setZoomEnabled(false);
-    setZoomLevel(1);
+    setZoomLevel(1.5);
     setStatus("Alles zurückgesetzt");
     if (baseInputRef.current) baseInputRef.current.value = "";
     if (overlayInputRef.current) overlayInputRef.current.value = "";
@@ -694,6 +742,16 @@ function App() {
     drawOverlay(false);
     setStatus("PNG exportiert");
   };
+
+  const zoomStyle = zoomEnabled
+    ? {
+        transform: `scale(${zoomLevel})`,
+        transformOrigin: `${zoomFocus.x}% ${zoomFocus.y}%`,
+      }
+    : {
+        transform: "scale(1)",
+        transformOrigin: "center center",
+      };
 
   return (
     <main className="app">
@@ -722,11 +780,11 @@ function App() {
             />
           </label>
 
-          <button onClick={autoDetectScreen}>Screen automatisch erkennen</button>
-          <button onClick={detectDeviceNotch}>Geräte-Notch erkennen</button>
-          <button onClick={resetPoints}>Punkte resetten</button>
-          <button onClick={resetAll}>Alles zurücksetzen</button>
-          <button onClick={exportImage}>PNG exportieren</button>
+          <button className="premium-btn" onClick={autoDetectScreen}>Screen automatisch erkennen</button>
+          <button className="premium-btn" onClick={detectDeviceNotch}>Geräte-Notch erkennen</button>
+          <button className="premium-btn" onClick={resetPoints}>Punkte resetten</button>
+          <button className="premium-btn" onClick={resetAll}>Alles zurücksetzen</button>
+          <button className="premium-btn" onClick={exportImage}>PNG exportieren</button>
 
           <div className="control">
             <label htmlFor="opacity">Image Opacity: {overlayOpacity}%</label>
@@ -740,35 +798,41 @@ function App() {
             />
           </div>
 
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={glassEnabled}
-              onChange={(e) => setGlassEnabled(e.target.checked)}
-            />
-            <span>Glass Layer aktiv</span>
+          <label className="switch-row">
+            <span>Glass Layer</span>
+            <button
+              type="button"
+              className={`switch ${glassEnabled ? "active" : ""}`}
+              onClick={() => setGlassEnabled((v) => !v)}
+            >
+              <span className="switch-knob" />
+            </button>
           </label>
 
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={notchEnabled}
-              onChange={(e) => setNotchEnabled(e.target.checked)}
-            />
+          <label className="switch-row">
             <span>Geräte-Notch freistellen</span>
+            <button
+              type="button"
+              className={`switch ${notchEnabled ? "active" : ""}`}
+              onClick={() => setNotchEnabled((v) => !v)}
+            >
+              <span className="switch-knob" />
+            </button>
           </label>
 
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={zoomEnabled}
-              onChange={() => {
+          <label className="switch-row">
+            <span>Zoom aktivieren</span>
+            <button
+              type="button"
+              className={`switch ${zoomEnabled ? "active" : ""}`}
+              onClick={() => {
                 const next = !zoomEnabled;
                 setZoomEnabled(next);
-                setZoomLevel(next ? 2 : 1);
+                if (!next) setZoomLevel(1.5);
               }}
-            />
-            <span>Zoom aktivieren</span>
+            >
+              <span className="switch-knob" />
+            </button>
           </label>
 
           {zoomEnabled && (
@@ -786,13 +850,15 @@ function App() {
             </div>
           )}
 
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={showGuides}
-              onChange={(e) => setShowGuides(e.target.checked)}
-            />
+          <label className="switch-row">
             <span>Guides anzeigen</span>
+            <button
+              type="button"
+              className={`switch ${showGuides ? "active" : ""}`}
+              onClick={() => setShowGuides((v) => !v)}
+            >
+              <span className="switch-knob" />
+            </button>
           </label>
 
           <div className="status">
@@ -816,20 +882,19 @@ function App() {
       <section className="stage">
         <div className="glow-orb orb-1" />
         <div className="glow-orb orb-2" />
-        <div
-          className="canvas-scale-shell"
-          style={{ transform: `scale(${zoomLevel})` }}
-        >
-          <div className="canvas-wrap">
-            <canvas ref={overlayCanvasRef} className="main-canvas rendered" />
-            <canvas
-              ref={baseCanvasRef}
-              className="main-canvas interactive"
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseUp}
-            />
+        <div className="canvas-viewport">
+          <div className="canvas-scale-shell" style={zoomStyle}>
+            <div className="canvas-wrap">
+              <canvas ref={overlayCanvasRef} className="main-canvas rendered" />
+              <canvas
+                ref={baseCanvasRef}
+                className="main-canvas interactive"
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+              />
+            </div>
           </div>
         </div>
       </section>
