@@ -21,6 +21,7 @@ function App() {
   const [status, setStatus] = useState("OpenCV lädt...");
   const [showGuides, setShowGuides] = useState(true);
   const [overlayOpacity, setOverlayOpacity] = useState(100);
+  const [glassEnabled, setGlassEnabled] = useState(true);
 
   useEffect(() => {
     const existing = document.getElementById("opencv-script");
@@ -68,12 +69,34 @@ function App() {
     ];
   };
 
+  const orderQuadPoints = (pts: Point[]): Point[] => {
+    const sums = pts.map((p) => p.x + p.y);
+    const diffs = pts.map((p) => p.x - p.y);
+
+    const topLeft = pts[sums.indexOf(Math.min(...sums))];
+    const bottomRight = pts[sums.indexOf(Math.max(...sums))];
+    const topRight = pts[diffs.indexOf(Math.max(...diffs))];
+    const bottomLeft = pts[diffs.indexOf(Math.min(...diffs))];
+
+    return [topLeft, topRight, bottomRight, bottomLeft];
+  };
+
+  const loadImageFromFile = (file: File, cb: (img: HTMLImageElement) => void) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      cb(img);
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  };
+
   const drawGuides = (ctx: CanvasRenderingContext2D) => {
     if (!showGuides || points.length !== 4) return;
 
     ctx.save();
     ctx.lineWidth = 2;
-    ctx.strokeStyle = "#8b5cf6";
+    ctx.strokeStyle = "#f97316";
     ctx.beginPath();
     ctx.moveTo(points[0].x, points[0].y);
     points.slice(1).forEach((p) => ctx.lineTo(p.x, p.y));
@@ -86,10 +109,10 @@ function App() {
       ctx.fillStyle = "#ffffff";
       ctx.fill();
       ctx.lineWidth = 3;
-      ctx.strokeStyle = "#8b5cf6";
+      ctx.strokeStyle = "#f97316";
       ctx.stroke();
 
-      ctx.fillStyle = "#8b5cf6";
+      ctx.fillStyle = "#f97316";
       ctx.font = "bold 16px sans-serif";
       ctx.fillText(String(i + 1), p.x + 14, p.y - 14);
     });
@@ -174,61 +197,47 @@ function App() {
         ctx.drawImage(tempCanvas, 0, 0);
         ctx.restore();
 
-        // --- Glass Reflection Effect ---
-        const gradient = ctx.createLinearGradient(
-          points[0].x,
-          points[0].y,
-          points[2].x,
-          points[2].y
-        );
-        gradient.addColorStop(0, "rgba(255,255,255,0.08)");
-        gradient.addColorStop(0.5, "rgba(255,255,255,0.03)");
-        gradient.addColorStop(1, "rgba(255,255,255,0.0)");
+        if (glassEnabled) {
+          const quadPath = new Path2D();
+          quadPath.moveTo(points[0].x, points[0].y);
+          points.slice(1).forEach((p) => quadPath.lineTo(p.x, p.y));
+          quadPath.closePath();
 
-        ctx.save();
-        ctx.globalCompositeOperation = "lighter";
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-        points.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
+          const gradient = ctx.createLinearGradient(
+            points[0].x,
+            points[0].y,
+            points[2].x,
+            points[2].y
+          );
+          gradient.addColorStop(0, "rgba(255,255,255,0.08)");
+          gradient.addColorStop(0.45, "rgba(255,160,80,0.05)");
+          gradient.addColorStop(1, "rgba(255,255,255,0)");
 
-        // --- Advanced Screen Glow ---
-        ctx.save();
-        ctx.globalCompositeOperation = "soft-light";
-        ctx.fillStyle = "rgba(255,255,255,0.06)";
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-        points.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
+          ctx.save();
+          ctx.globalCompositeOperation = "screen";
+          ctx.fillStyle = gradient;
+          ctx.fill(quadPath);
+          ctx.restore();
 
-        // --- Subtle Vignette ---
-        const centerX = (points[0].x + points[2].x) / 2;
-        const centerY = (points[0].y + points[2].y) / 2;
-        const vignette = ctx.createRadialGradient(
-          centerX,
-          centerY,
-          10,
-          centerX,
-          centerY,
-          600
-        );
-        vignette.addColorStop(0, "rgba(0,0,0,0)");
-        vignette.addColorStop(1, "rgba(0,0,0,0.15)");
+          const centerX = (points[0].x + points[2].x) / 2;
+          const centerY = (points[0].y + points[2].y) / 2;
+          const vignette = ctx.createRadialGradient(
+            centerX,
+            centerY,
+            20,
+            centerX,
+            centerY,
+            Math.max(canvas.width, canvas.height) * 0.35
+          );
+          vignette.addColorStop(0, "rgba(0,0,0,0)");
+          vignette.addColorStop(1, "rgba(0,0,0,0.16)");
 
-        ctx.save();
-        ctx.globalCompositeOperation = "multiply";
-        ctx.fillStyle = vignette;
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-        points.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
+          ctx.save();
+          ctx.globalCompositeOperation = "multiply";
+          ctx.fillStyle = vignette;
+          ctx.fill(quadPath);
+          ctx.restore();
+        }
 
         src.delete();
         dst.delete();
@@ -236,69 +245,24 @@ function App() {
         dstTri.delete();
         M.delete();
 
-        if (!forExport) {
-          setStatus("Image auf Mockup angewendet");
-        }
+        if (!forExport) setStatus("Image auf Mockup angewendet");
       } catch (e) {
         console.error(e);
         setStatus("Fehler bei der Perspektivtransformation");
       }
     }
 
-    if (!forExport) {
-      drawGuides(ctx);
-    }
+    if (!forExport) drawGuides(ctx);
   };
 
-  useEffect(() => {
+  const redrawAll = () => {
     drawBase();
-  }, [baseImg, points, canvasSize, showGuides]);
+    drawOverlay();
+  };
 
   useEffect(() => {
-    drawOverlay();
-  }, [baseImg, overlayImg, points, cvReady, canvasSize, showGuides, overlayOpacity]);
-
-  const loadImageFromFile = (file: File, cb: (img: HTMLImageElement) => void) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      cb(img);
-      URL.revokeObjectURL(url);
-    };
-    img.src = url;
-  };
-
-  const handleBaseUpload = (file?: File) => {
-    if (!file) return;
-    loadImageFromFile(file, (img) => {
-      setBaseImg(img);
-      setPoints(createInsetPoints(img.width, img.height));
-      setStatus("Mockup geladen");
-    });
-  };
-
-  const handleOverlayUpload = (file?: File) => {
-    if (!file) return;
-    loadImageFromFile(file, (img) => {
-      setOverlayImg(img);
-      setStatus("Image geladen");
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => drawOverlay());
-      });
-    });
-  };
-
-  const orderQuadPoints = (pts: Point[]): Point[] => {
-    const sums = pts.map((p) => p.x + p.y);
-    const diffs = pts.map((p) => p.x - p.y);
-
-    const topLeft = pts[sums.indexOf(Math.min(...sums))];
-    const bottomRight = pts[sums.indexOf(Math.max(...sums))];
-    const topRight = pts[diffs.indexOf(Math.max(...diffs))];
-    const bottomLeft = pts[diffs.indexOf(Math.min(...diffs))];
-
-    return [topLeft, topRight, bottomRight, bottomLeft];
-  };
+    redrawAll();
+  }, [baseImg, overlayImg, points, cvReady, showGuides, overlayOpacity, glassEnabled]);
 
   const autoDetectScreen = () => {
     if (!baseImg || !cvReady || !window.cv) {
@@ -375,6 +339,7 @@ function App() {
       if (bestQuad) {
         setPoints(bestQuad);
         setStatus("Screen automatisch erkannt");
+        requestAnimationFrame(() => requestAnimationFrame(redrawAll));
       } else {
         setStatus("Kein passender Screen gefunden – bitte manuell nachjustieren");
       }
@@ -382,6 +347,24 @@ function App() {
       console.error(error);
       setStatus("Fehler bei der automatischen Erkennung");
     }
+  };
+
+  const handleBaseUpload = (file?: File) => {
+    if (!file) return;
+    loadImageFromFile(file, (img) => {
+      setBaseImg(img);
+      setPoints(createInsetPoints(img.width, img.height));
+      setStatus("Mockup geladen");
+    });
+  };
+
+  const handleOverlayUpload = (file?: File) => {
+    if (!file) return;
+    loadImageFromFile(file, (img) => {
+      setOverlayImg(img);
+      setStatus("Image geladen");
+      requestAnimationFrame(() => requestAnimationFrame(redrawAll));
+    });
   };
 
   const getCanvasPoint = (event: React.MouseEvent<HTMLCanvasElement, MouseEvent>) => {
@@ -423,7 +406,7 @@ function App() {
     const canvas = overlayCanvasRef.current;
     if (!canvas) return;
     const link = document.createElement("a");
-    link.download = "screenfit-export.png";
+    link.download = "mockmaster-export.png";
     link.href = canvas.toDataURL("image/png");
     link.click();
     drawOverlay(false);
@@ -433,8 +416,8 @@ function App() {
   return (
     <main className="app">
       <aside className="sidebar">
-        <h1>screenfit</h1>
-        <p className="sub">BMAD MVP – auto detect</p>
+        <h1>MockMaster</h1>
+        <p className="sub">Black edition</p>
 
         <div className="panel">
           <label className="upload">
@@ -474,6 +457,15 @@ function App() {
           <label className="toggle">
             <input
               type="checkbox"
+              checked={glassEnabled}
+              onChange={(e) => setGlassEnabled(e.target.checked)}
+            />
+            <span>Glass Layer aktiv</span>
+          </label>
+
+          <label className="toggle">
+            <input
+              type="checkbox"
               checked={showGuides}
               onChange={(e) => setShowGuides(e.target.checked)}
             />
@@ -485,20 +477,20 @@ function App() {
           </div>
 
           <div className="hint">
-            Reihenfolge:
+            Workflow:
             <br />
-            1 = oben links
+            1. Mockup laden
             <br />
-            2 = oben rechts
+            2. Screen automatisch erkennen
             <br />
-            3 = unten rechts
-            <br />
-            4 = unten links
+            3. Image laden
           </div>
         </div>
       </aside>
 
       <section className="stage">
+        <div className="glow-orb orb-1" />
+        <div className="glow-orb orb-2" />
         <div className="canvas-wrap">
           <canvas ref={overlayCanvasRef} className="main-canvas rendered" />
           <canvas
