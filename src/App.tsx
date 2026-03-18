@@ -32,6 +32,8 @@ function App() {
   const [glassEnabled, setGlassEnabled] = useState(true);
   const [notchEnabled, setNotchEnabled] = useState(true);
   const [detectedNotch, setDetectedNotch] = useState<NotchSpec | null>(null);
+  const [zoomEnabled, setZoomEnabled] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(1);
 
   useEffect(() => {
     const existing = document.getElementById("opencv-script");
@@ -639,8 +641,8 @@ function App() {
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     return {
-      x: (event.clientX - rect.left) * scaleX,
-      y: (event.clientY - rect.top) * scaleY,
+      x: (event.clientX - rect.left) * scaleX / zoomLevel,
+      y: (event.clientY - rect.top) * scaleY / zoomLevel,
     };
   };
 
@@ -674,6 +676,8 @@ function App() {
     setDetectedNotch(null);
     setDragIndex(null);
     setOverlayOpacity(100);
+    setZoomEnabled(false);
+    setZoomLevel(1);
     setStatus("Alles zurückgesetzt");
     if (baseInputRef.current) baseInputRef.current.value = "";
     if (overlayInputRef.current) overlayInputRef.current.value = "";
@@ -757,6 +761,34 @@ function App() {
           <label className="toggle">
             <input
               type="checkbox"
+              checked={zoomEnabled}
+              onChange={() => {
+                const next = !zoomEnabled;
+                setZoomEnabled(next);
+                setZoomLevel(next ? 2 : 1);
+              }}
+            />
+            <span>Zoom aktivieren</span>
+          </label>
+
+          {zoomEnabled && (
+            <div className="control">
+              <label htmlFor="zoom">Zoom: {zoomLevel.toFixed(1)}x</label>
+              <input
+                id="zoom"
+                type="range"
+                min="1"
+                max="4"
+                step="0.1"
+                value={zoomLevel}
+                onChange={(e) => setZoomLevel(Number(e.target.value))}
+              />
+            </div>
+          )}
+
+          <label className="toggle">
+            <input
+              type="checkbox"
               checked={showGuides}
               onChange={(e) => setShowGuides(e.target.checked)}
             />
@@ -784,16 +816,21 @@ function App() {
       <section className="stage">
         <div className="glow-orb orb-1" />
         <div className="glow-orb orb-2" />
-        <div className="canvas-wrap">
-          <canvas ref={overlayCanvasRef} className="main-canvas rendered" />
-          <canvas
-            ref={baseCanvasRef}
-            className="main-canvas interactive"
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-          />
+        <div
+          className="canvas-scale-shell"
+          style={{ transform: `scale(${zoomLevel})` }}
+        >
+          <div className="canvas-wrap">
+            <canvas ref={overlayCanvasRef} className="main-canvas rendered" />
+            <canvas
+              ref={baseCanvasRef}
+              className="main-canvas interactive"
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+            />
+          </div>
         </div>
       </section>
     </main>
