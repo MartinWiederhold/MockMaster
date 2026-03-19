@@ -29,6 +29,7 @@ function App() {
   const [status, setStatus] = useState("OpenCV lädt...");
   const [showGuides, setShowGuides] = useState(true);
   const [overlayOpacity, setOverlayOpacity] = useState(100);
+  const [cornerRadiusPercent, setCornerRadiusPercent] = useState(0);
   const [glassEnabled, setGlassEnabled] = useState(true);
   const [notchEnabled, setNotchEnabled] = useState(true);
   const [detectedNotch, setDetectedNotch] = useState<NotchSpec | null>(null);
@@ -93,6 +94,12 @@ function App() {
 
     return [topLeft, topRight, bottomRight, bottomLeft];
   };
+
+  
+  useEffect(() => {
+    drawBase();
+    drawOverlay();
+  }, [cornerRadiusPercent]);
 
   const loadImageFromFile = (file: File, cb: (img: HTMLImageElement) => void) => {
     const url = URL.createObjectURL(file);
@@ -217,10 +224,12 @@ function App() {
     ctx.save();
     ctx.lineWidth = 2;
     ctx.strokeStyle = "#f97316";
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-    points.slice(1).forEach((p) => ctx.lineTo(p.x, p.y));
-    ctx.closePath();
+    const topWidth = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y);
+    const leftHeight = Math.hypot(points[3].x - points[0].x, points[3].y - points[0].y);
+    const guideBaseRadius = Math.min(topWidth, leftHeight) * 0.22;
+    const guideRadius = guideBaseRadius * (cornerRadiusPercent / 100);
+
+    drawRoundedGuidePath(ctx, guideRadius);
     ctx.stroke();
 
     points.forEach((p, i) => {
@@ -252,7 +261,91 @@ function App() {
     drawGuides(ctx);
   };
 
-  const drawOverlay = (forExport = false) => {
+  
+  
+  const drawRoundedGuidePath = (ctx: CanvasRenderingContext2D, radiusPx: number) => {
+    if (points.length !== 4) return;
+
+    const [p0, p1, p2, p3] = points;
+
+    const unit = (a: Point, b: Point) => {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy) || 1;
+      return { x: dx / len, y: dy / len };
+    };
+
+    const top = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+    const right = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    const bottom = Math.hypot(p2.x - p3.x, p2.y - p3.y);
+    const left = Math.hypot(p3.x - p0.x, p3.y - p0.y);
+
+    const r = Math.max(0, Math.min(radiusPx, top * 0.35, right * 0.35, bottom * 0.35, left * 0.35));
+
+    if (r <= 0.5) {
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.lineTo(p3.x, p3.y);
+      ctx.closePath();
+      return;
+    }
+
+    const topU = unit(p0, p1);
+    const rightU = unit(p1, p2);
+    const bottomU = unit(p2, p3);
+    const leftU = unit(p3, p0);
+
+    const p0Top = { x: p0.x + topU.x * r, y: p0.y + topU.y * r };
+    const p1Top = { x: p1.x - topU.x * r, y: p1.y - topU.y * r };
+
+    const p1Right = { x: p1.x + rightU.x * r, y: p1.y + rightU.y * r };
+    const p2Right = { x: p2.x - rightU.x * r, y: p2.y - rightU.y * r };
+
+    const p2Bottom = { x: p2.x + bottomU.x * r, y: p2.y + bottomU.y * r };
+    const p3Bottom = { x: p3.x - bottomU.x * r, y: p3.y - bottomU.y * r };
+
+    const p3Left = { x: p3.x + leftU.x * r, y: p3.y + leftU.y * r };
+    const p0Left = { x: p0.x - leftU.x * r, y: p0.y - leftU.y * r };
+
+    ctx.beginPath();
+    ctx.moveTo(p0Top.x, p0Top.y);
+    ctx.lineTo(p1Top.x, p1Top.y);
+    ctx.quadraticCurveTo(p1.x, p1.y, p1Right.x, p1Right.y);
+    ctx.lineTo(p2Right.x, p2Right.y);
+    ctx.quadraticCurveTo(p2.x, p2.y, p2Bottom.x, p2Bottom.y);
+    ctx.lineTo(p3Bottom.x, p3Bottom.y);
+    ctx.quadraticCurveTo(p3.x, p3.y, p3Left.x, p3Left.y);
+    ctx.lineTo(p0Left.x, p0Left.y);
+    ctx.quadraticCurveTo(p0.x, p0.y, p0Top.x, p0Top.y);
+    ctx.closePath();
+  };
+
+
+  const roundedRectPath = (
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    radius: number
+  ) => {
+    const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + width - r, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+    ctx.lineTo(x + width, y + height - r);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+    ctx.lineTo(x + r, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  };
+
+const drawOverlay = (forExport = false) => {
     const canvas = overlayCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -276,6 +369,19 @@ function App() {
         const srcCtx = srcCanvas.getContext("2d");
         if (!srcCtx) return;
         srcCtx.drawImage(overlayImg, 0, 0);
+
+        srcCtx.clearRect(0, 0, srcCanvas.width, srcCanvas.height);
+
+        const maxRadius = Math.min(overlayImg.width, overlayImg.height) * 0.28;
+        const radius = maxRadius * (cornerRadiusPercent / 100);
+
+        srcCtx.save();
+        if (radius > 0.5) {
+          roundedRectPath(srcCtx, 0, 0, overlayImg.width, overlayImg.height, radius);
+          srcCtx.clip();
+        }
+        srcCtx.drawImage(overlayImg, 0, 0, overlayImg.width, overlayImg.height);
+        srcCtx.restore();
 
         const src = cv.imread(srcCanvas);
         const dst = new cv.Mat.zeros(canvas.height, canvas.width, src.type());
@@ -795,6 +901,18 @@ function App() {
               max="100"
               value={overlayOpacity}
               onChange={(e) => setOverlayOpacity(Number(e.target.value))}
+            />
+          </div>
+
+          <div className="control">
+            <label htmlFor="cornerRadius">Ecken abrunden: {cornerRadiusPercent}%</label>
+            <input
+              id="cornerRadius"
+              type="range"
+              min="0"
+              max="100"
+              value={cornerRadiusPercent}
+              onChange={(e) => setCornerRadiusPercent(Number(e.target.value))}
             />
           </div>
 
